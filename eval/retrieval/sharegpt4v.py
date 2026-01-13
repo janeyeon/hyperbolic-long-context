@@ -263,7 +263,7 @@ if __name__ == '__main__':
 
     if is_hycoclip: 
         # model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
-        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/hycoclip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip, is_hyperbolic=is_hyperbolic)
+        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/hycoclip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
     else:
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/ViT-B-16.pt", load_from_clip=load_from_clip)
     model.eval()

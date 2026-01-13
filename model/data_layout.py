@@ -97,7 +97,18 @@ class LayoutSAMJsonDataset(Dataset):
         # ---- load image ----
         filename = os.path.basename(sample["image_path"])
         img_path = os.path.join(self.image_root, filename)
-        image = Image.open(img_path).convert("RGB")
+
+        # try: 
+        #     image = Image.open(img_path).convert("RGB")
+
+
+        try:
+            image = Image.open(img_path).convert("RGB")
+        except Exception as e:
+            print(f"[WARN] Failed to load image: {img_path}")
+            new_idx = torch.randint(0, len(self), (1,)).item()
+            return self.__getitem__(new_idx)
+            
         W, H = image.size
 
         # ---- parse bbox info ----
