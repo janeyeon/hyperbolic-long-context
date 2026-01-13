@@ -60,12 +60,15 @@ if __name__ == '__main__':
     load_from_clip = True
     is_hyperbolic = True
 
+
     if is_hycoclip: 
         # model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/hycoclip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
     else:
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/ViT-B-16.pt", load_from_clip=load_from_clip)
     model.eval()
+    _curv = model.curv.exp()
+
     print("model done!")
     
     img_feature_list = []
@@ -106,7 +109,7 @@ if __name__ == '__main__':
         for i in range(text_feature.shape[0]):
             text = text_feature[i]
             if is_hyperbolic:
-                sim = L.pairwise_inner(text, image_embeds)
+                sim = L.pairwise_inner(text, image_embeds, _curv)
             else: 
                 sim = text @ image_embeds.T
             sim = sim.squeeze()
@@ -127,7 +130,7 @@ if __name__ == '__main__':
             img = image_embeds[i]
             # sim = img @ text_feature.T
             if is_hyperbolic:
-                sim = L.pairwise_inner(img, text_feature)
+                sim = L.pairwise_inner(img, text_feature, _curv)
             else: 
                 sim = img @ text_feature.T
             sim = sim.squeeze()

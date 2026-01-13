@@ -70,7 +70,10 @@ if __name__ == '__main__':
     else:
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/ViT-B-16.pt", load_from_clip=load_from_clip)
     model.eval()
+    _curv = model.curv.exp()
     print("model done!")
+
+    
     
     img_feature_list = []
     text_list_1 = []
@@ -113,7 +116,7 @@ if __name__ == '__main__':
             text = text_feature[i]
             # sim = text @ image_embeds.T
             if is_hyperbolic:
-                sim = L.pairwise_inner(text, image_embeds)
+                sim = L.pairwise_inner(text, image_embeds, _curv)
             else: 
                 sim = text @ image_embeds.T
             sim = sim.squeeze()
@@ -134,7 +137,7 @@ if __name__ == '__main__':
             img = image_embeds[i]
             # sim = img @ text_feature.T
             if is_hyperbolic:
-                sim = L.pairwise_inner(img, text_feature)
+                sim = L.pairwise_inner(img, text_feature, _curv)
             else: 
                 sim = img @ text_feature.T
             sim = sim.squeeze()

@@ -8,6 +8,13 @@ from torch import nn
 
 from .hycoclip_vision import build_timm_vit
 from .hycoclip_textual import TransformerTextEncoder
+import math
+from model import lorentz 
+
+# import sys
+# sys.path.append("..")
+
+from train import distributed as dist
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -588,6 +595,21 @@ class CLIP_hyco(nn.Module):
         self.mask2 = torch.zeros([248, 1])
         self.mask2[20:, :] = 1
 
+        #! 여기에 hyperbolic 뒷부분 
+        self.visual_alpha = nn.Parameter(torch.tensor(embed_dim**-0.5).log())
+        self.textual_alpha = nn.Parameter(torch.tensor(embed_dim**-0.5).log())
+
+        curv_init = 1.0
+        self.curv = nn.Parameter(
+            torch.tensor(curv_init).log(), requires_grad=True
+        )
+        # When learning the curvature parameter, restrict it in this interval to
+        # prevent training instability.
+        self._curv_minmax = {
+            "max": math.log(curv_init * 10),
+            "min": math.log(curv_init / 10),
+        }
+
 
     @property
     def device(self) -> torch.device:
@@ -649,6 +671,24 @@ class CLIP_hyco(nn.Module):
 
         return image_feats
 
+    def encode_image_hyco(self, images: torch.Tensor, project=True):
+        images = images.to(self.dtype)
+
+        images = (images - self.pixel_mean.to(images.dtype)) / self.pixel_std.to(images.dtype)
+
+        image_feats = self.visual(images)
+        image_feats = self.visual_proj(image_feats)
+
+        # if project:
+        #     image_feats = F.normalize(image_feats, dim=-1)
+        #! 이거 대신 projection! 
+        if project:
+            image_feats = image_feats * self.visual_alpha.exp()
+            with torch.autocast(self.device.type, dtype=torch.float32):
+                image_feats = lorentz.exp_map0(image_feats, self.curv.exp())
+
+        return image_feats
+
 
 
 
@@ -707,6 +747,73 @@ class CLIP_hyco(nn.Module):
             x = F.normalize(x, dim=-1)
 
         return x
+    
+
+
+    def encode_text_hyco(self, tokens: list[torch.Tensor], project=True):
+
+
+        for idx, inst_tokens in enumerate(tokens):
+            # if len(inst_tokens) > self.textual.context_length:
+            if len(inst_tokens) > self.context_length:
+
+                eot_token = inst_tokens[-1]
+                # inst_tokens = inst_tokens[: self.textual.context_length]
+                inst_tokens = inst_tokens[: self.context_length]
+                inst_tokens[-1] = eot_token
+                tokens[idx] = inst_tokens
+
+        tokens = torch.nn.utils.rnn.pad_sequence(tokens, batch_first=True)
+        tokens = tokens.to(self.device)
+
+        B, L = tokens.shape
+
+
+        x = self.textual.token_embed(tokens).type(self.dtype)   # [B, L, D]
+       
+        pos = (
+            self.textual.posit_embed[:L].to(x.device) * self.mask1[:L].to(x.device)
+            + self.textual.posit_embed_res[:L].to(x.device) * self.mask2[:L].to(x.device)
+        )  # [L, D]
+        # if hasattr(self.textual, "posit_embed_res"):
+        #     pos = (
+        #         self.textual.posit_embed[:L].to(x.device) * self.mask1[:L].to(x.device)
+        #     + self.textual.posit_embed_res[:L].to(x.device) * self.mask2[:L].to(x.device)
+        #     )
+        # else:
+        #     pos = self.textual.posit_embed[:L].to(x.device)
+        #! 이부분에서 positional encoding 더해줌
+        x = x + pos.unsqueeze(0).type(self.dtype)
+
+        # attn_mask = self.textual.attn_mask[:L, :L]
+        attn_mask = self.build_attention_mask().to(x.device)
+
+        for block in self.textual.resblocks:
+            # if self.grad_checkpointing and self.training:
+            #     x = checkpoint(block, x, attn_mask)
+            # else:
+            x = block(x, attn_mask)
+
+        x = self.textual.ln_final(x)
+        x = x.type(self.dtype)
+        eos_idx = tokens.argmax(dim=-1)
+        batch_idx = torch.arange(B, device=x.device)
+        x = x[batch_idx, eos_idx]
+        x = self.textual_proj(x)
+
+        # if project:
+        #     x = F.normalize(x, dim=-1)
+        #! 이거 대신 projection! 
+
+        if project:
+            x = x * self.textual_alpha.exp()
+            # print(f"text_feats_textual_alpha:{text_feats[0]}")
+            with torch.autocast(self.device.type, dtype=torch.float32):
+                x = lorentz.exp_map0(x, self.curv.exp())
+
+
+        return x
+    
     
     def encode_text_full(self, tokens: list[torch.Tensor]):
         for idx, inst_tokens in enumerate(tokens):
@@ -838,6 +945,181 @@ class CLIP_hyco(nn.Module):
                 + F.cross_entropy(sim_ts2i, targets, label_smoothing=0.1)
             ) / 2
         return loss_itcl, loss_itcs
+
+    def forward_hycoclip(
+        self,
+        images: torch.Tensor,
+        box_images: torch.Tensor,
+        tokens: torch.Tensor,
+        box_tokens: torch.Tensor,
+        rank: int,
+    ):
+        """
+        CLIP-style hyperbolic forward
+        - loss is computed HERE
+        - returns multiple scalar losses (no dict)
+        """
+
+        # -------------------------------------------------
+        # Curvature & scale constraints
+        # -------------------------------------------------
+        self.curv.data = torch.clamp(self.curv.data, **self._curv_minmax)
+        _curv = self.curv.exp()
+
+        self.visual_alpha.data.clamp_(max=0.0)
+        self.textual_alpha.data.clamp_(max=0.0)
+
+        self.logit_scale.data.clamp_(max=4.6052)
+        logit_scale = self.logit_scale.exp()
+
+        # -------------------------------------------------
+        # Encode features
+        # -------------------------------------------------
+        image_feats = self.encode_image_hyco(images, project=True)
+        text_feats = self.encode_text_hyco(tokens, project=True)
+
+        box_image_feats = self.encode_image_hyco(box_images, project=True)
+        box_text_feats = self.encode_text_hyco(box_tokens, project=True)
+
+        # -------------------------------------------------
+        # Normalize (CLIP-style)
+        # -------------------------------------------------
+        # image_feats = image_feats / image_feats.norm(dim=1, keepdim=True)
+        # text_feats = text_feats / text_feats.norm(dim=1, keepdim=True)
+        # box_image_feats = box_image_feats / box_image_feats.norm(dim=1, keepdim=True)
+        # box_text_feats = box_text_feats / box_text_feats.norm(dim=1, keepdim=True)
+
+        # -------------------------------------------------
+        # Gather (WITH gradient, CLIP-style)
+        # -------------------------------------------------
+        # image_all = torch.cat(
+        #     torch.distributed.nn.all_gather(image_feats), dim=0
+        # )
+        # text_all = torch.cat(
+        #     torch.distributed.nn.all_gather(text_feats), dim=0
+        # )
+
+        # box_image_all = torch.cat(
+        #     torch.distributed.nn.all_gather(box_image_feats), dim=0
+        # )
+        # box_text_all = torch.cat(
+        #     torch.distributed.nn.all_gather(box_text_feats), dim=0
+        # )
+
+        image_all =  dist.gather_across_processes(image_feats)
+        image_all = torch.cat(image_all, dim=0)
+
+        text_all =  dist.gather_across_processes(text_feats)
+        text_all =  torch.cat(text_all, dim=0)
+
+        box_image_all = dist.gather_across_processes(box_image_feats)
+        box_image_all =  torch.cat(box_image_all, dim=0)
+
+
+        box_text_all = dist.gather_across_processes(box_text_feats)
+        box_text_all =  torch.cat(box_text_all, dim=0)
+
+
+
+
+        # -------------------------------------------------
+        # Hyperbolic similarities (negative distance)
+        # -------------------------------------------------
+        image_logits = -lorentz.pairwise_dist(image_feats, text_all, _curv)
+        text_logits = -lorentz.pairwise_dist(text_feats, image_all, _curv)
+
+        box_image_logits = -lorentz.pairwise_dist(box_image_feats, text_all, _curv)
+        box_text_logits = -lorentz.pairwise_dist(box_text_feats, image_all, _curv)
+
+        image_logits *= logit_scale
+        text_logits *= logit_scale
+        box_image_logits *= logit_scale
+        box_text_logits *= logit_scale
+        # bs = image_feats.size(0)
+        # targets = torch.linspace(
+        #     rank * bs,
+        #     rank * bs + bs - 1,
+        #     bs,
+        #     dtype=torch.long,
+        #     device=images.device,
+        # )
+
+        batch_size = image_feats.shape[0]
+        targets = torch.arange(batch_size, device=image_logits.device)
+        targets = targets + batch_size * rank
+
+        self.logit_scale.data = torch.clamp(self.logit_scale.data, max=4.6052)
+        _scale = self.logit_scale.exp()
+
+        # loss_itc = (
+        #     F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
+        #     + F.cross_entropy(sim_t2i, targets, label_smoothing=0.1)
+        # ) / 2
+
+        # breakpoint()
+
+        # loss_box_itc = (
+        #     F.cross_entropy(sim_bi2t, targets, label_smoothing=0.1)
+        #     + F.cross_entropy(sim_bt2i, targets, label_smoothing=0.1)
+        # ) / 2
+
+        contrastive_loss = 0.25 * (
+            nn.functional.cross_entropy(_scale * image_logits, targets)
+            + nn.functional.cross_entropy(_scale * text_logits, targets)
+            + nn.functional.cross_entropy(_scale * box_image_logits, targets)
+            + nn.functional.cross_entropy(_scale * box_text_logits, targets)
+        )
+
+
+        # -------------------------------------------------
+        # Hyperbolic entailment losses
+        # -------------------------------------------------
+        _angle = lorentz.oxy_angle(text_feats, image_feats, _curv)
+        _aperture = lorentz.half_aperture(text_feats, _curv)
+
+        _box_angle = lorentz.oxy_angle(box_text_feats, box_image_feats, _curv)
+        _box_aperture = lorentz.half_aperture(box_text_feats, _curv)
+
+        _cross_image_angle = lorentz.oxy_angle(box_image_feats, image_feats, _curv)
+        _box_image_aperture = lorentz.half_aperture(box_image_feats, _curv)
+
+        _cross_text_angle = lorentz.oxy_angle(box_text_feats, text_feats, _curv)
+        _box_text_aperture = lorentz.half_aperture(box_text_feats, _curv)
+
+        # Hyperparameters for apertures
+        _global_aperture_thresh = 0.7   # inter-modal
+        _local_aperture_thresh = 1.2    # intra-modal
+
+        text_image_entailment_loss = torch.clamp(_angle - _global_aperture_thresh * _aperture, min=0).mean()
+        box_text_image_entailment_loss = torch.clamp(_box_angle - _global_aperture_thresh * _box_aperture, min=0).mean()
+        cross_image_entailment_loss = torch.clamp(_cross_image_angle - _local_aperture_thresh * _box_image_aperture, min=0).mean()
+        cross_text_entailment_loss = torch.clamp(_cross_text_angle - _local_aperture_thresh * _box_text_aperture, min=0).mean()
+        
+        entailment_loss = 0.5 * (
+            text_image_entailment_loss 
+            + box_text_image_entailment_loss 
+            + cross_image_entailment_loss 
+            + cross_text_entailment_loss
+        )
+
+        # -------------------------------------------------
+        # Final losses (returned directly)
+        # -------------------------------------------------
+        # total_loss = loss_itc + loss_box_itc
+        # if self.entail_weight > 0:
+        #     total_loss = total_loss + self.entail_weight * loss_entail
+
+        loss = contrastive_loss
+        loss = loss + 0.5 * entailment_loss
+
+        # return loss, contrastive_loss, entailment_loss
+
+        return {
+            "loss": loss,
+            "contrastive_loss": contrastive_loss,
+            "entailment_loss": entailment_loss
+        }
+
     
 
 def convert_weights_hyco(model: nn.Module):
@@ -904,9 +1186,9 @@ def convert_weights(model: nn.Module):
 
     def _convert_weights_to_fp16(l):
         if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Linear)):
-            l.weight.data = l.weight.data.half()
-            if l.bias is not None:
-                l.bias.data = l.bias.data.half()
+            lorentz.weight.data = lorentz.weight.data.half()
+            if lorentz.bias is not None:
+                lorentz.bias.data = lorentz.bias.data.half()
 
         if isinstance(l, nn.MultiheadAttention):
             for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:

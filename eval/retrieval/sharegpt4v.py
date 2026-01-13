@@ -85,6 +85,8 @@ def run_sharegpt4v(model, processor, data_path, is_hyperbolic):
     dataset = local_dataset(data_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.eval()
+
+    _curv = model.curv.exp()
     
     img_feature_list = []
     text_list = []
@@ -129,7 +131,7 @@ def run_sharegpt4v(model, processor, data_path, is_hyperbolic):
 
             # sim = text @ image_embeds.T
             if is_hyperbolic:
-                sim = L.pairwise_inner(text, image_embeds)
+                sim = L.pairwise_inner(text, image_embeds, _curv)
             else: 
                 sim = text @ image_embeds.T
             sim = sim.squeeze()
@@ -151,7 +153,7 @@ def run_sharegpt4v(model, processor, data_path, is_hyperbolic):
             img = image_embeds[i]
             # sim = 100 * img @ text_feature.T
             if is_hyperbolic:
-                sim = L.pairwise_inner(img, text_feature)
+                sim = L.pairwise_inner(img, text_feature, _curv)
             else: 
                 sim = img @ text_feature.T
             sim = sim.squeeze()
