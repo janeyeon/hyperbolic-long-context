@@ -57,6 +57,8 @@ class LayoutSAMJsonDataset(Dataset):
             T.CenterCrop(image_size),
             T.ToTensor(),
         ])
+
+        self.tensor_resize = T.Resize((image_size, image_size))
         # self.transforms = [TransformWithBoxes(t) for t in base_transforms]
         # self.data = []
         # for json_file in self.json_files:
@@ -64,11 +66,23 @@ class LayoutSAMJsonDataset(Dataset):
         #         self.data.append(json.load(f))
 
 
+    def apply_transform_safe(self, x):
+        # PIL Image
+        if isinstance(x, Image.Image):
+            return self.transforms(x)
+
+        # Tensor (C,H,W)
+        elif torch.is_tensor(x):
+            return self.tensor_resize(x)
+
+        else:
+            raise TypeError(f"Unsupported type for transform: {type(x)}")
+
     def apply_transforms(self, image, boxes):
-        transformed_image = self.transforms(image)
+        transformed_image = self.apply_transform_safe(image)
         transformed_boxes = []
         for box in boxes:
-            transformed_boxes.append(self.transforms(image[box]))
+            transformed_boxes.append(self.apply_transform_safe(image[box]))
         transformed_boxes  = torch.cat(transformed_boxes, dim=0)
         return transformed_image, transformed_boxes
 
@@ -113,7 +127,7 @@ class LayoutSAMJsonDataset(Dataset):
 
         # ---- apply joint transforms ----
         # image, boxes = self.apply_transforms(image, boxes)
-        image = self.transforms(image)
+        image = self.apply_transform_safe(image)
         
 
         # ---- box images (crop from transformed image) ----
@@ -129,7 +143,7 @@ class LayoutSAMJsonDataset(Dataset):
             crop = image[:, py1:py2, px1:px2]
             if crop.numel() > 0:
                 # crop = T.Resize((224,224))(crop)
-                box_images[i] = self.transforms(crop)
+                box_images[i] = self.apply_transform_safe(crop)
 
             box_texts.append(texts[i])
 
@@ -149,81 +163,4 @@ class LayoutSAMJsonDataset(Dataset):
             "bbox": bbox_template,
             "num_boxes": limit,
         }
-
-
-
-# class LayoutSAMJsonDataset(Dataset):
-#     def __init__(
-#         self,
-#         json_path,
-#         image_root,
-#         image_size=224,
-#         max_boxes=5,
-#         min_score=0.0,
-#     ):
-#         with open(json_path, "r") as f:
-#             self.data = json.load(f)
-
-#         self.image_root = image_root
-#         self.max_boxes = max_boxes
-#         self.min_score = min_score
-
-#         self.img_tf = T.Compose([
-#             T.Resize(image_size),
-#             T.CenterCrop(image_size),
-#             T.ToTensor(),
-#         ])
-
-#     def __len__(self):
-#         return len(self.data)
-
-#     def __getitem__(self, idx):
-#         entry = self.data[idx]
-
-#         img_path = os.path.join(self.image_root, entry["image_path"])
-#         image = Image.open(img_path).convert("RGB")
-#         W, H = image.size
-#         image = self.img_tf(image)
-
-#         boxes = []
-#         texts = []
-
-#         for obj in entry["metadata"]["bbox_info"]:
-#             if obj["score"] < self.min_score:
-#                 continue
-#             boxes.append(obj["bbox"])
-#             texts.append(obj["description"])
-
-#         if len(boxes) == 0:
-#             boxes = [[0, 0, W, H]]
-#             texts = ["background"]
-
-#         boxes = torch.tensor(boxes, dtype=torch.float32)
-#         boxes[:, [0, 2]] /= W
-#         boxes[:, [1, 3]] /= H
-
-#         num_boxes = min(len(boxes), self.max_boxes)
-
-#         box_images = torch.zeros(self.max_boxes, 3, 224, 224)
-#         _, h, w = image.shape
-
-#         for i in range(num_boxes):
-#             x1, y1, x2, y2 = boxes[i]
-#             px1, py1 = int(x1 * w), int(y1 * h)
-#             px2, py2 = int(x2 * w), int(y2 * h)
-#             crop = image[:, py1:py2, px1:px2]
-#             if crop.numel() > 0:
-#                 crop = T.Resize((224, 224))(crop)
-#                 box_images[i] = crop
-
-#         bbox = torch.zeros(self.max_boxes, 5)
-#         bbox[:num_boxes, :4] = boxes[:num_boxes]
-#         bbox[:num_boxes, 4] = 1.0
-
-#         return {
-#             "image": image,
-#             "text": " ".join(texts),
-#             "box_image": box_images,
-#             "box_text": texts[:num_boxes],
-#         }
 
