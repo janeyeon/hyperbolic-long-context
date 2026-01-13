@@ -16,7 +16,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-
+from model import lorentz as L
 
 
 # image_root = '/SHARE_ST/icl/hyperbolic/datasets/eval/Urban1k/Urban1k/image/'
@@ -62,9 +62,11 @@ if __name__ == '__main__':
     device = "cuda" if torch.cuda.is_available() else "cpu"
     is_hycoclip = True
     load_from_clip = True
+    is_hyperbolic = True
 
     if is_hycoclip: 
-        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
+        # model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
+        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/hycoclip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
     else:
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/ViT-B-16.pt", load_from_clip=load_from_clip)
     model.eval()
@@ -82,18 +84,26 @@ if __name__ == '__main__':
             text_list.append(caption)
 
         text_feature = longclip.tokenize(text_list, truncate=True).to(device)
-        text_feature = model.encode_text(text_feature)
-        text_feature /= text_feature.norm(dim=-1, keepdim=True)
+        # text_feature = model.encode_text(text_feature)
+        if is_hyperbolic:
+            text_feature = model.encode_text_hyco(text_feature)
+        else: 
+            text_feature = model.encode_text(text_feature)
+        # text_feature /= text_feature.norm(dim=-1, keepdim=True)
         
         for i, (image, caption) in enumerate(tqdm(dataset)):         
             
             image = preprocess(image).unsqueeze(0).to(device)
-            img_feature = model.encode_image(image)
+            # img_feature = model.encode_image(image)
+            if is_hyperbolic:
+                img_feature = model.encode_image_hyco(image)
+            else: 
+                img_feature = model.encode_image(image)
             img_feature_list.append(img_feature)
         
 
         image_embeds = torch.cat(img_feature_list, dim=0)
-        image_embeds /= image_embeds.norm(dim=-1, keepdim=True)
+        # image_embeds /= image_embeds.norm(dim=-1, keepdim=True)
         
         print("text 2 image")
         i = 0
@@ -101,7 +111,11 @@ if __name__ == '__main__':
         total = 0
         for i in range(text_feature.shape[0]):
             text = text_feature[i]
-            sim = text @ image_embeds.T
+            # sim = text @ image_embeds.T
+            if is_hyperbolic:
+                sim = L.pairwise_inner(text, image_embeds)
+            else: 
+                sim = text @ image_embeds.T
             sim = sim.squeeze()
             correct_i = torch.argmax(sim)
 
@@ -118,7 +132,11 @@ if __name__ == '__main__':
         total = 0
         for i in range(image_embeds.shape[0]):
             img = image_embeds[i]
-            sim = img @ text_feature.T
+            # sim = img @ text_feature.T
+            if is_hyperbolic:
+                sim = L.pairwise_inner(img, text_feature)
+            else: 
+                sim = img @ text_feature.T
             sim = sim.squeeze()
             correct_i = torch.argmax(sim)
 

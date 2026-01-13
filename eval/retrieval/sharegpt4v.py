@@ -101,14 +101,18 @@ def run_sharegpt4v(model, processor, data_path, is_hyperbolic):
         # Text feature extraction
         text_feature = longclip.tokenize(text_list, truncate=True).to(device)
         if is_hyperbolic:
-            text_feature = model.encode_text(text_feature)
+            text_feature = model.encode_text_hyco(text_feature)
         else: 
             text_feature = model.encode_text(text_feature)
         # text_feature /= text_feature.norm(dim=-1, keepdim=True)
         
         for i, (image, caption) in enumerate(tqdm(dataset)):           
             image = processor(image).unsqueeze(0).to(device)
-            img_feature = model.encode_image(image)
+            # img_feature = model.encode_image(image)
+            if is_hyperbolic:
+                img_feature = model.encode_image_hyco(image)
+            else: 
+                img_feature = model.encode_image(image)
             img_feature_list.append(img_feature)
             
         image_embeds = torch.cat(img_feature_list, dim=0)
@@ -167,56 +171,65 @@ def collate_fn(batch):
     return images, list(captions)
 
 
-def run_sharegpt4v_openclip(model, distilled_model, processor, data_path):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.eval()
-    distilled_model.eval()
+# def run_sharegpt4v_openclip(model, distilled_model, processor, data_path):
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+#     model.eval()
+#     distilled_model.eval()
     
-    dataset = OptimizedLocalDataset(data_path, processor)
-    batch_size = 512  # Adjust based on your GPU memory
-    num_workers = 4  # Adjust based on your CPU cores
+#     dataset = OptimizedLocalDataset(data_path, processor)
+#     batch_size = 512  # Adjust based on your GPU memory
+#     num_workers = 4  # Adjust based on your CPU cores
 
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
-        collate_fn=collate_fn,
-        prefetch_factor=2
-    )
+#     dataloader = DataLoader(
+#         dataset,
+#         batch_size=batch_size,
+#         shuffle=False,
+#         num_workers=num_workers,
+#         pin_memory=True,
+#         collate_fn=collate_fn,
+#         prefetch_factor=2
+#     )
 
-    logit_scale = 100
-    img_feature_list = []
-    text_list = []
+#     logit_scale = 100
+#     img_feature_list = []
+#     text_list = []
 
-    with torch.no_grad():
-        for images, captions in tqdm(dataloader, desc="Processing batches"):
-            text_encoded = processor.tokenizer(captions).to(device)
-            image_encoded = images.to(device)
+#     with torch.no_grad():
+#         for images, captions in tqdm(dataloader, desc="Processing batches"):
+#             text_encoded = processor.tokenizer(captions).to(device)
+#             image_encoded = images.to(device)
             
-            image_features = model.encode_image(image_encoded)
-            text_features = distilled_model.encode_text(text_encoded)
+#             # image_features = model.encode_image(image_encoded)
+#              if is_hyperbolic:
+#                 img_features = model.encode_image_hyco(image_encoded)
+#             else: 
+#                 img_features = model.encode_image(image_encoded)
 
-            text_list.append(text_features)
-            img_feature_list.append(image_features)
+#             if is_hyperbolic:
+#                 text_features = model.encode_text_hyco(text_encoded)
+#             else: 
+#                 text_features = model.encode_text(text_encoded)
+#             # text_features = distilled_model.encode_text(text_encoded)
+
+#             text_list.append(text_features)
+#             img_feature_list.append(image_features)
         
-        text_feature = torch.cat(text_list, dim=0)
-        text_feature /= text_feature.norm(dim=-1, keepdim=True)
+#         text_feature = torch.cat(text_list, dim=0)
+#         text_feature /= text_feature.norm(dim=-1, keepdim=True)
             
-        image_embeds = torch.cat(img_feature_list, dim=0)
-        image_embeds /= image_embeds.norm(dim=-1, keepdim=True)
+#         image_embeds = torch.cat(img_feature_list, dim=0)
+#         image_embeds /= image_embeds.norm(dim=-1, keepdim=True)
         
-        metrics = get_clip_metrics(image_embeds, text_feature, logit_scale)
+#         metrics = get_clip_metrics(image_embeds, text_feature, logit_scale)
         
-        # Print or return the metrics
-        for k in [1, 5, 10]:
-            print(f"Text to Image - R@{k}: {metrics[f'text_to_image_R@{k}']}")
+#         # Print or return the metrics
+#         for k in [1, 5, 10]:
+#             print(f"Text to Image - R@{k}: {metrics[f'text_to_image_R@{k}']}")
 
-        for k in [1, 5, 10]:
-            print(f"Image to Text - R@{k}: {metrics[f'image_to_text_R@{k}']}")
+#         for k in [1, 5, 10]:
+#             print(f"Image to Text - R@{k}: {metrics[f'image_to_text_R@{k}']}")
 
-        return metrics
+#         return metrics
 
 def get_clip_metrics(image_features, text_features, logit_scale):
     metrics = {}
