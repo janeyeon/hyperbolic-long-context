@@ -9,6 +9,7 @@ import torch.utils.data as data
 import os
 import numpy as np
 from tqdm import tqdm
+from model import lorentz as L
 
 docci_image_root = '/SHARE_ST/icl/hyperbolic/datasets/eval/docci/pipeline/dataset/images'
 docci_json_path = '/SHARE_ST/icl/hyperbolic/datasets/eval/docci/datasets/docci_test.json'
@@ -57,9 +58,10 @@ if __name__ == '__main__':
     device = "cuda" if torch.cuda.is_available() else "cpu"
     is_hycoclip = True
     load_from_clip = True
+    is_hyperbolic = True
 
     if is_hycoclip: 
-        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
+        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip, is_hyperbolic=is_hyperbolic)
     else:
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/ViT-B-16.pt", load_from_clip=load_from_clip)
     model.eval()

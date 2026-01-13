@@ -11,6 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from model import lorentz as L
 
 import csv
 
@@ -80,7 +81,7 @@ class OptimizedLocalDataset(data.Dataset):
 
         return img_tensor, caption
     
-def run_sharegpt4v(model, processor, data_path):
+def run_sharegpt4v(model, processor, data_path, is_hyperbolic):
     dataset = local_dataset(data_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.eval()
@@ -99,7 +100,10 @@ def run_sharegpt4v(model, processor, data_path):
 
         # Text feature extraction
         text_feature = longclip.tokenize(text_list, truncate=True).to(device)
-        text_feature = model.encode_text(text_feature)
+        if is_hyperbolic:
+            text_feature = model.encode_text(text_feature)
+        else: 
+            text_feature = model.encode_text(text_feature)
         # text_feature /= text_feature.norm(dim=-1, keepdim=True)
         
         for i, (image, caption) in enumerate(tqdm(dataset)):           
@@ -119,7 +123,11 @@ def run_sharegpt4v(model, processor, data_path):
         for i in range(text_feature.shape[0]):
             text = text_feature[i]
 
-            sim = 100 * text @ image_embeds.T
+            # sim = text @ image_embeds.T
+            if is_hyperbolic:
+                sim = L.pairwise_inner(text, image_embeds)
+            else: 
+                sim = text @ image_embeds.T
             sim = sim.squeeze()
             correct_i = torch.argmax(sim)
 
@@ -137,7 +145,11 @@ def run_sharegpt4v(model, processor, data_path):
         total_i2t = 0
         for i in range(image_embeds.shape[0]):
             img = image_embeds[i]
-            sim = 100 * img @ text_feature.T
+            # sim = 100 * img @ text_feature.T
+            if is_hyperbolic:
+                sim = L.pairwise_inner(img, text_feature)
+            else: 
+                sim = img @ text_feature.T
             sim = sim.squeeze()
             correct_i = torch.argmax(sim)
 
@@ -232,13 +244,15 @@ if __name__ == '__main__':
     device = "cuda" if torch.cuda.is_available() else "cpu"
     is_hycoclip = True
     load_from_clip = True
+    is_hyperbolic = True
 
     if is_hycoclip: 
-        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
+        # model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
+        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/hycoclip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip, is_hyperbolic=is_hyperbolic)
     else:
         model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/ViT-B-16.pt", load_from_clip=load_from_clip)
     model.eval()
     print("model done!")
 
-    run_sharegpt4v(model, preprocess, data_path)
+    run_sharegpt4v(model, preprocess, data_path, is_hyperbolic)
     print("Success on Sharegpt4V!!!")
