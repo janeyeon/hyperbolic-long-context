@@ -149,8 +149,6 @@ class TransformerTextEncoder(nn.Module):
 
         max_len = text_tokens.shape[-1]
         _posit_embed = self.posit_embed[:max_len, :]
-        # _attn_mask = self.attn_mask[:max_len, :max_len]
-        # _attn_mask = self.build_attention_mask()
         _attn_mask = attn_mask
 
         # TODO : what is

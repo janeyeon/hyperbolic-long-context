@@ -230,8 +230,8 @@ def load_from_clip(name: str, device: Union[str, torch.device] = "cuda" if torch
         model_path = _download(_MODELS[name], download_root or os.path.expanduser("~/.cache/clip"), is_hycocilp=is_hycoclip)
     elif os.path.isfile(name):
         model_path = name
-    # else:
-    #     raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
+    else:
+        raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
 
     if is_hycoclip: 
         state_dict = torch.load(model_path, map_location=device, weights_only = False)["model"]
@@ -254,28 +254,53 @@ def load_from_clip(name: str, device: Union[str, torch.device] = "cuda" if torch
     else:
         model = build_model(state_dict or model.state_dict(), load_from_clip = load_from_clip).to(device)
         
-    positional_embedding_pre = model.textual.posit_embed.type(model.dtype)
-            
-    length, dim = positional_embedding_pre.shape
-    keep_len = 20
-    posisitonal_embedding_new = torch.zeros([4*length-3*keep_len, dim], dtype=model.dtype)
-    for i in range(keep_len):
-        posisitonal_embedding_new[i] = positional_embedding_pre[i]
-    for i in range(length-1-keep_len):
-        posisitonal_embedding_new[4*i + keep_len] = positional_embedding_pre[i + keep_len]
-        posisitonal_embedding_new[4*i + 1 + keep_len] = 3*positional_embedding_pre[i + keep_len]/4 + 1*positional_embedding_pre[i+1+keep_len]/4
-        posisitonal_embedding_new[4*i + 2+keep_len] = 2*positional_embedding_pre[i+keep_len]/4 + 2*positional_embedding_pre[i+1+keep_len]/4
-        posisitonal_embedding_new[4*i + 3+keep_len] = 1*positional_embedding_pre[i+keep_len]/4 + 3*positional_embedding_pre[i+1+keep_len]/4
+    if is_hycoclip:
+        positional_embedding_pre = model.textual.posit_embed.type(model.dtype)
+                
+        length, dim = positional_embedding_pre.shape
+        keep_len = 20
+        posisitonal_embedding_new = torch.zeros([4*length-3*keep_len, dim], dtype=model.dtype)
+        for i in range(keep_len):
+            posisitonal_embedding_new[i] = positional_embedding_pre[i]
+        for i in range(length-1-keep_len):
+            posisitonal_embedding_new[4*i + keep_len] = positional_embedding_pre[i + keep_len]
+            posisitonal_embedding_new[4*i + 1 + keep_len] = 3*positional_embedding_pre[i + keep_len]/4 + 1*positional_embedding_pre[i+1+keep_len]/4
+            posisitonal_embedding_new[4*i + 2+keep_len] = 2*positional_embedding_pre[i+keep_len]/4 + 2*positional_embedding_pre[i+1+keep_len]/4
+            posisitonal_embedding_new[4*i + 3+keep_len] = 1*positional_embedding_pre[i+keep_len]/4 + 3*positional_embedding_pre[i+1+keep_len]/4
 
-    posisitonal_embedding_new[4*length -3*keep_len - 4] = positional_embedding_pre[length-1] + 0*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
-    posisitonal_embedding_new[4*length -3*keep_len - 3] = positional_embedding_pre[length-1] + 1*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
-    posisitonal_embedding_new[4*length -3*keep_len - 2] = positional_embedding_pre[length-1] + 2*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
-    posisitonal_embedding_new[4*length -3*keep_len - 1] = positional_embedding_pre[length-1] + 3*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
-            
-    positional_embedding_res = posisitonal_embedding_new.clone()
-            
-    model.textual.posit_embed = nn.Parameter(posisitonal_embedding_new, requires_grad=False)
-    model.textual.posit_embed_res = nn.Parameter(positional_embedding_res, requires_grad=True)
+        posisitonal_embedding_new[4*length -3*keep_len - 4] = positional_embedding_pre[length-1] + 0*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+        posisitonal_embedding_new[4*length -3*keep_len - 3] = positional_embedding_pre[length-1] + 1*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+        posisitonal_embedding_new[4*length -3*keep_len - 2] = positional_embedding_pre[length-1] + 2*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+        posisitonal_embedding_new[4*length -3*keep_len - 1] = positional_embedding_pre[length-1] + 3*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+                
+        positional_embedding_res = posisitonal_embedding_new.clone()
+                
+        model.textual.posit_embed = nn.Parameter(posisitonal_embedding_new, requires_grad=False)
+        model.textual.posit_embed_res = nn.Parameter(positional_embedding_res, requires_grad=True)
+    else:
+        positional_embedding_pre = model.positional_embedding.type(model.dtype)
+                
+        length, dim = positional_embedding_pre.shape
+        keep_len = 20
+        posisitonal_embedding_new = torch.zeros([4*length-3*keep_len, dim], dtype=model.dtype)
+        for i in range(keep_len):
+            posisitonal_embedding_new[i] = positional_embedding_pre[i]
+        for i in range(length-1-keep_len):
+            posisitonal_embedding_new[4*i + keep_len] = positional_embedding_pre[i + keep_len]
+            posisitonal_embedding_new[4*i + 1 + keep_len] = 3*positional_embedding_pre[i + keep_len]/4 + 1*positional_embedding_pre[i+1+keep_len]/4
+            posisitonal_embedding_new[4*i + 2+keep_len] = 2*positional_embedding_pre[i+keep_len]/4 + 2*positional_embedding_pre[i+1+keep_len]/4
+            posisitonal_embedding_new[4*i + 3+keep_len] = 1*positional_embedding_pre[i+keep_len]/4 + 3*positional_embedding_pre[i+1+keep_len]/4
+
+        posisitonal_embedding_new[4*length -3*keep_len - 4] = positional_embedding_pre[length-1] + 0*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+        posisitonal_embedding_new[4*length -3*keep_len - 3] = positional_embedding_pre[length-1] + 1*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+        posisitonal_embedding_new[4*length -3*keep_len - 2] = positional_embedding_pre[length-1] + 2*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+        posisitonal_embedding_new[4*length -3*keep_len - 1] = positional_embedding_pre[length-1] + 3*(positional_embedding_pre[length-1] - positional_embedding_pre[length-2])/4
+                
+        positional_embedding_res = posisitonal_embedding_new.clone()
+                
+        model.positional_embedding = nn.Parameter(posisitonal_embedding_new, requires_grad=False)
+        model.positional_embedding_res = nn.Parameter(positional_embedding_res, requires_grad=True)
+
 
     if str(device) == "cpu":
         model.float()

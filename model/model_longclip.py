@@ -661,7 +661,7 @@ class CLIP_hyco(nn.Module):
     def encode_image(self, images: torch.Tensor, project=True):
         images = images.to(self.dtype)
 
-        images = (images - self.pixel_mean.to(images.dtype)) / self.pixel_std.to(images.dtype)
+        # images = (images - self.pixel_mean.to(images.dtype)) / self.pixel_std.to(images.dtype)
 
         image_feats = self.visual(images)
         image_feats = self.visual_proj(image_feats)
@@ -674,14 +674,14 @@ class CLIP_hyco(nn.Module):
     def encode_image_hyco(self, images: torch.Tensor, project=True):
         images = images.to(self.dtype)
 
-        images = (images - self.pixel_mean.to(images.dtype)) / self.pixel_std.to(images.dtype)
+        # images = (images - self.pixel_mean.to(images.dtype)) / self.pixel_std.to(images.dtype)
 
         image_feats = self.visual(images)
         image_feats = self.visual_proj(image_feats)
 
         # if project:
         #     image_feats = F.normalize(image_feats, dim=-1)
-        #! 이거 대신 projection! 
+        #! 이거 대신 projection! - hycoclip 이니까
         if project:
             image_feats = image_feats * self.visual_alpha.exp()
             with torch.autocast(self.device.type, dtype=torch.float32):
@@ -693,14 +693,9 @@ class CLIP_hyco(nn.Module):
 
 
     def encode_text(self, tokens: list[torch.Tensor], project=True):
-
-
         for idx, inst_tokens in enumerate(tokens):
-            # if len(inst_tokens) > self.textual.context_length:
             if len(inst_tokens) > self.context_length:
-
                 eot_token = inst_tokens[-1]
-                # inst_tokens = inst_tokens[: self.textual.context_length]
                 inst_tokens = inst_tokens[: self.context_length]
                 inst_tokens[-1] = eot_token
                 tokens[idx] = inst_tokens
@@ -754,11 +749,9 @@ class CLIP_hyco(nn.Module):
 
 
         for idx, inst_tokens in enumerate(tokens):
-            # if len(inst_tokens) > self.textual.context_length:
             if len(inst_tokens) > self.context_length:
 
                 eot_token = inst_tokens[-1]
-                # inst_tokens = inst_tokens[: self.textual.context_length]
                 inst_tokens = inst_tokens[: self.context_length]
                 inst_tokens[-1] = eot_token
                 tokens[idx] = inst_tokens
@@ -789,9 +782,6 @@ class CLIP_hyco(nn.Module):
         attn_mask = self.build_attention_mask().to(x.device)
 
         for block in self.textual.resblocks:
-            # if self.grad_checkpointing and self.training:
-            #     x = checkpoint(block, x, attn_mask)
-            # else:
             x = block(x, attn_mask)
 
         x = self.textual.ln_final(x)
@@ -801,8 +791,7 @@ class CLIP_hyco(nn.Module):
         x = x[batch_idx, eos_idx]
         x = self.textual_proj(x)
 
-        # if project:
-        #     x = F.normalize(x, dim=-1)
+
         #! 이거 대신 projection! 
 
         if project:
@@ -868,38 +857,7 @@ class CLIP_hyco(nn.Module):
 
         return X_reversed
     
-        # def PCA(self, input_tensor, PCA_dim):
-        #     mean = torch.mean(input_tensor, dim=0)
-        #     X_centered = input_tensor - mean.unsqueeze(0)
-        #     X_centered = X_centered.float()
-        #     cov_matrix = torch.mm(X_centered.T, X_centered)
-        #     eigenvalues, eigenvectors = torch.linalg.eig(cov_matrix)
-        #     eigenvalues = eigenvalues.float()
-        #     eigenvectors = eigenvectors.float()    
-        #     sorted_indices = torch.argsort(eigenvalues, descending=True)
-        #     eigenvectors = eigenvectors[:, sorted_indices]
-        #     principal_components = eigenvectors[:, :PCA_dim]
-        #     X_transformed = torch.mm(X_centered, principal_components)
-        #     X_reversed = torch.mm(X_transformed, principal_components.T)
-        #     X_reversed += mean
-        #     return X_reversed
-
-
-        # def forward(self, image, text):
-        #     image_features = self.encode_image(image)
-        #     text_features = self.encode_text(text)
-
-        #     # normalized features
-        #     image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        #     text_features = text_features / text_features.norm(dim=1, keepdim=True)
-
-        #     # cosine similarity as logits
-        #     logit_scale = self.logit_scale.exp()
-        #     logits_per_image = logit_scale * image_features @ text_features.t()
-        #     logits_per_text = logits_per_image.t()
-
-        #     # shape = [global_batch_size, global_batch_size]
-        #     return logits_per_image, logits_per_text
+        
 
         #rewrite forward, fix the bug of no gradient in the original concat_all_gather. Notice that torch.distributed.nn.all_gather has backward function
     def forward(self, image, text_long,text_short,rank):
@@ -981,30 +939,7 @@ class CLIP_hyco(nn.Module):
         box_image_feats = self.encode_image_hyco(box_images, project=True)
         box_text_feats = self.encode_text_hyco(box_tokens, project=True)
 
-        # -------------------------------------------------
-        # Normalize (CLIP-style)
-        # -------------------------------------------------
-        # image_feats = image_feats / image_feats.norm(dim=1, keepdim=True)
-        # text_feats = text_feats / text_feats.norm(dim=1, keepdim=True)
-        # box_image_feats = box_image_feats / box_image_feats.norm(dim=1, keepdim=True)
-        # box_text_feats = box_text_feats / box_text_feats.norm(dim=1, keepdim=True)
 
-        # -------------------------------------------------
-        # Gather (WITH gradient, CLIP-style)
-        # -------------------------------------------------
-        # image_all = torch.cat(
-        #     torch.distributed.nn.all_gather(image_feats), dim=0
-        # )
-        # text_all = torch.cat(
-        #     torch.distributed.nn.all_gather(text_feats), dim=0
-        # )
-
-        # box_image_all = torch.cat(
-        #     torch.distributed.nn.all_gather(box_image_feats), dim=0
-        # )
-        # box_text_all = torch.cat(
-        #     torch.distributed.nn.all_gather(box_text_feats), dim=0
-        # )
 
         image_all =  dist.gather_across_processes(image_feats)
         image_all = torch.cat(image_all, dim=0)
@@ -1018,10 +953,6 @@ class CLIP_hyco(nn.Module):
 
         box_text_all = dist.gather_across_processes(box_text_feats)
         box_text_all =  torch.cat(box_text_all, dim=0)
-
-
-
-
         # -------------------------------------------------
         # Hyperbolic similarities (negative distance)
         # -------------------------------------------------
@@ -1035,14 +966,7 @@ class CLIP_hyco(nn.Module):
         text_logits *= logit_scale
         box_image_logits *= logit_scale
         box_text_logits *= logit_scale
-        # bs = image_feats.size(0)
-        # targets = torch.linspace(
-        #     rank * bs,
-        #     rank * bs + bs - 1,
-        #     bs,
-        #     dtype=torch.long,
-        #     device=images.device,
-        # )
+    
 
         batch_size = image_feats.shape[0]
         targets = torch.arange(batch_size, device=image_logits.device)
@@ -1051,17 +975,6 @@ class CLIP_hyco(nn.Module):
         self.logit_scale.data = torch.clamp(self.logit_scale.data, max=4.6052)
         _scale = self.logit_scale.exp()
 
-        # loss_itc = (
-        #     F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
-        #     + F.cross_entropy(sim_t2i, targets, label_smoothing=0.1)
-        # ) / 2
-
-        # breakpoint()
-
-        # loss_box_itc = (
-        #     F.cross_entropy(sim_bi2t, targets, label_smoothing=0.1)
-        #     + F.cross_entropy(sim_bt2i, targets, label_smoothing=0.1)
-        # ) / 2
 
         contrastive_loss = 0.25 * (
             nn.functional.cross_entropy(_scale * image_logits, targets)
@@ -1206,6 +1119,9 @@ def convert_weights(model: nn.Module):
 
 
 def build_model_hyco(state_dict: dict, load_from_clip: bool):
+    #! 이거 추가 
+    state_dict.pop("textual.attn_mask", None)
+
     vision_width = state_dict["visual.patch_embed.proj.weight"].shape[0]
 
     vision_layers = len({
@@ -1250,4 +1166,4 @@ def build_model_hyco(state_dict: dict, load_from_clip: bool):
 
     # convert_weights_hyco(model)
     model.load_state_dict(state_dict, strict=False)
-    return model.eval()
+    return model

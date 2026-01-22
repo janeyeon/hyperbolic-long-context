@@ -177,7 +177,7 @@ pyrightconfig.json
 
 checkpoints/*
 
-
+*.pt
 *.tar
 *.pth
 *.gz

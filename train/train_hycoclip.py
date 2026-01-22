@@ -62,10 +62,10 @@ class Trainer:
     def __init__(self, rank, local_rank, args):
         self.rank = rank
 
-        is_hycoclip = True
-        load_from_clip = True
-        # model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/clip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
-        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/pixel/Long-CLIP/checkpoints/hycoclip_vit_b.pth", is_hycoclip=is_hycoclip, load_from_clip=load_from_clip)
+        self.is_hycoclip = True
+        self.load_from_clip = True
+
+        model, preprocess = longclip.load_from_clip(device='cuda',name="/home/khy5630/2025-temp/hyperbolic-long-context/checkpoints/hycoclip_vit_b.pth", is_hycoclip=self.is_hycoclip, load_from_clip=self.load_from_clip)
         self.model = model.cuda()
 
         self.model = torch.nn.parallel.DistributedDataParallel(
@@ -87,9 +87,20 @@ class Trainer:
         for epoch in range(self.epochs):
             loader.sampler.set_epoch(epoch)
             self.model.train()
-            print(f"--------------epoch: {epoch}--------------")
 
-            for step, (images, box_images, texts, box_texts) in tqdm(enumerate(loader)):
+            if self.rank == 0
+                print(f"--------------epoch: {epoch}--------------")
+                pbar = tqdm(
+                    loader,
+                    total=len(loader),
+                    desc=f"Epoch {epoch}",
+                    dynamic_ncols=True,
+                    leave=True,
+                )
+            else:
+                pbar = loader
+
+            for step, (images, box_images, texts, box_texts) in enumerate(pbar):
                 images = images.cuda(non_blocking=True)
                 box_images = box_images.cuda(non_blocking=True)
 
@@ -117,16 +128,33 @@ class Trainer:
 
                 if self.rank == 0 and step % 50 == 0:
                     print(
-                        f"[E{epoch} S{step}] "
+                        f"\n[E{epoch} S{step}] "
                         f"loss={out['loss'].item():.4f} "
                         f"contrast={out['contrastive_loss'].item():.4f}"
                     )
 
             if self.rank == 0:
-                torch.save(
-                    self.model.module.state_dict(),
-                    f"ckpt_epoch_{epoch}.pt",
-                )
+                # torch.save(
+                #     self.model.module.state_dict(),
+                #     f"ckpt_epoch_{epoch}.pt",
+                # )
+
+                now = datetime.now()
+                formatted_date = now.strftime("%m-%d--%H_%M_%S_")
+
+                state_dict = self.model.module.state_dict()
+
+                if self.is_hycoclip:
+                    save_obj = {"model": state_dict}
+                    filename = f"{self.rank}_{formatted_date}_ours.pth"
+                else:
+                    save_obj = state_dict
+                    filename = f"{self.rank}_{formatted_date}longclip.pt"
+
+                save_path = os.path.join(self.ckptdir, filename)
+                torch.save(save_obj, save_path)
+
+                print(f"[CKPT] Saved checkpoint to {save_path}")
 
 
 # ============================================================
